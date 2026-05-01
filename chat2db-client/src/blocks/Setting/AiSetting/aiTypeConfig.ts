@@ -46,7 +46,7 @@ const AIFormConfig: Record<AIType, IAiConfigBooleans> = {
     apiHost: 'https://api.openai.com/',
     httpProxyHost: true,
     httpProxyPort: true,
-    model: 'deepseek-v4-flash',
+    model: 'gpt-3.5-turbo',
   },
   [AIType.AZUREAI]: {
     apiKey: true,

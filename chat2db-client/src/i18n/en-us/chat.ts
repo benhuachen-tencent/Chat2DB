@@ -7,4 +7,7 @@ export default {
   'chat.input.syncTable.tips': 'The automatically synchronize all table structures to the AI context',
   'chat.input.remain.tooltip': 'The manually selected table will be synchronized to the AI context',
   'chat.input.syncTable.tempTips': '🎉Update: Automatically synchronize all table structures to the AI context',
+  'chat.input.auto.tooltip': 'Auto mode: intelligently pick related tables from your question (up to 3 tables)',
+  'chat.input.auto.noMatch': 'No related table matched in the current database. Please switch to Manual and select tables.',
+  'chat.input.auto.matched': 'Auto matched:',
 };

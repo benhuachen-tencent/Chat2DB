@@ -94,7 +94,7 @@ public class OpenAIClient {
         if (modelConfig != null && StringUtils.isNotBlank(modelConfig.getContent())) {
             model = modelConfig.getContent();
         } else {
-            model = "deepseek-v4-flash";
+            model = "gpt-3.5-turbo";
         }
         String host = System.getProperty("http.proxyHost");
         Config hostConfig = configService.find(PROXY_HOST).getData();
@@ -122,18 +122,7 @@ public class OpenAIClient {
 
     public static String getModel() {
         if (model == null) {
-            // Try to read model from config, or use default
-            try {
-                ConfigService configService = ApplicationContextUtil.getBean(ConfigService.class);
-                Config modelConfig = configService.find(OPENAI_MODEL).getData();
-                if (modelConfig != null && StringUtils.isNotBlank(modelConfig.getContent())) {
-                    model = modelConfig.getContent();
-                } else {
-                    model = "deepseek-v4-flash";
-                }
-            } catch (Exception e) {
-                model = "deepseek-v4-flash";
-            }
+            singleton();
         }
         return model;
     }

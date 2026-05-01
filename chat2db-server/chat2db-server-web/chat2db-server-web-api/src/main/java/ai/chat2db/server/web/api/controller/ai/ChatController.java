@@ -640,6 +640,14 @@ public class ChatController {
             default:
                 break;
         }
+        // Add output format instructions (use plain text, no # prefix, since # gets stripped later)
+        schemaProperty = schemaProperty + "\n"
+            + "\n[OUTPUT FORMAT REQUIREMENTS - STRICTLY FOLLOW]"
+            + "\n1. Output ONLY the SQL statement, nothing else. No explanations, no reasoning, no thinking process."
+            + "\n2. First line must be a SQL comment with the original question: -- " + prompt
+            + "\n3. Output plain SQL directly. Do NOT wrap in markdown code blocks. Do NOT use triple backticks."
+            + "\n4. Every SQL statement must end with a semicolon (;)"
+            + "\n5. Do NOT output any text before or after the SQL statement.";
         String cleanedInput = schemaProperty.replaceAll("[\r\t]", "");
         return cleanedInput;
     }

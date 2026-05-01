@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import { formatParams } from '@/utils/url';
 import connectToEventSource from '@/utils/eventSource';
-import { Spin, Drawer, Modal } from 'antd';
+import { Spin, Drawer, Modal, message } from 'antd';
 import ChatInput, { SyncModelType } from './components/ChatInput';
 import MonacoEditor, { IEditorOptions, IExportRefFunction, IRangeType } from '../MonacoEditor';
 import aiServer from '@/service/ai';
@@ -22,6 +22,7 @@ import { chatErrorForKey, chatErrorToLogin } from '@/constants/chat';
 import { AIType } from '@/typings/ai';
 import i18n from '@/i18n';
 import configService from '@/service/config';
+import { autoSelectTables } from '@/utils/autoSelectTables';
 import styles from './index.less';
 
 // ----- hooks -----
@@ -76,6 +77,9 @@ interface IIntelligentEditorContext {
   setTableNameList: (tables: string[]) => void;
   selectedTables: string[];
   setSelectedTables: (tables: string[]) => void;
+  /** 完整表元信息（含 comment），供自动选表算法使用 */
+  tableMetaList: Array<{ name: string; comment?: string }>;
+  setTableMetaList: (list: Array<{ name: string; comment?: string }>) => void;
 }
 
 export const IntelligentEditorContext = createContext<IIntelligentEditorContext>({} as any);
@@ -96,6 +100,7 @@ function ConsoleEditor(props: IProps, ref: ForwardedRef<IConsoleRef>) {
   const editorRef = useRef<IExportRefFunction>();
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [tableNameList, setTableNameList] = useState<string[]>([]);
+  const [tableMetaList, setTableMetaList] = useState<Array<{ name: string; comment?: string }>>([]);
   const [syncTableModel, setSyncTableModel] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const [aiContent, setAiContent] = useState('');
@@ -198,6 +203,23 @@ function ConsoleEditor(props: IProps, ref: ForwardedRef<IConsoleRef>) {
 
     const { dataSourceId, databaseName, schemaName } = boundInfo;
     const isNL2SQL = promptType === IPromptType.NL_2_SQL;
+
+    // 计算本次请求实际要携带的 tableNames
+    // - 手动模式：使用用户勾选的表（原行为）
+    // - 自动模式：仅对 NL_2_SQL 生效，基于用户输入从 tableNameList 中智能匹配；无命中则阻止提交并提示切到手动
+    let effectiveTableNames: string[] | null = null;
+    if (syncTableModel === SyncModelType.MANUAL) {
+      effectiveTableNames = selectedTables?.length ? selectedTables : null;
+    } else if (syncTableModel === SyncModelType.AUTO && isNL2SQL) {
+      const autoHit = autoSelectTables(content, tableMetaList || [], 3);
+      if (!autoHit.length) {
+        message.warning(i18n('chat.input.auto.noMatch'));
+        return;
+      }
+      effectiveTableNames = autoHit;
+      message.info(`${i18n('chat.input.auto.matched')} ${autoHit.join(', ')}`);
+    }
+
     if (isNL2SQL) {
       setIsLoading(true);
     } else {
@@ -212,7 +234,7 @@ function ConsoleEditor(props: IProps, ref: ForwardedRef<IConsoleRef>) {
       dataSourceId,
       databaseName,
       schemaName,
-      tableNames: syncTableModel ? selectedTables : null,
+      tableNames: effectiveTableNames,
       ext,
     });
 
@@ -385,6 +407,8 @@ function ConsoleEditor(props: IProps, ref: ForwardedRef<IConsoleRef>) {
         setTableNameList,
         selectedTables,
         setSelectedTables,
+        tableMetaList,
+        setTableMetaList,
       }}
     >
       <div className={styles.console} ref={ref as any}>

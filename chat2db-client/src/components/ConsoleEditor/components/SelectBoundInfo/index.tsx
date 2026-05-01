@@ -40,7 +40,7 @@ const emptyOption = {
 
 const SelectBoundInfo = memo((props: IProps) => {
   const { boundInfo, setBoundInfo } = props;
-  const { setSelectedTables, setTableNameList, isActive } = useContext(IntelligentEditorContext);
+  const { setSelectedTables, setTableNameList, setTableMetaList, isActive } = useContext(IntelligentEditorContext);
   const connectionList = useConnectionStore((state) => state.connectionList);
   const [databaseNameList, setDatabaseNameList] = useState<IOption<string>[]>([emptyOption]);
   const [schemaList, setSchemaList] = useState<IOption<string>[]>([emptyOption]);
@@ -171,6 +171,10 @@ const SelectBoundInfo = memo((props: IProps) => {
     if (isActive) {
       const tableNameListTemp = allTableList.map((t) => t.name);
       setTableNameList(tableNameListTemp);
+      // 保存带 comment 的完整表元信息，供自动选表算法使用（comment 是中文→表名的最强桥梁）
+      setTableMetaList(
+        allTableList.map((t) => ({ name: t.name, comment: t.comment })),
+      );
       registerIntelliSenseTable(
         allTableList,
         boundInfo.databaseType,

@@ -8,8 +8,8 @@ import ai.chat2db.server.web.api.controller.ai.baichuan.model.BaichuanChatComple
 import ai.chat2db.server.web.api.controller.ai.baichuan.model.BaichuanChatMessage;
 import ai.chat2db.server.web.api.controller.ai.chat2db.client.Chat2dbAIClient;
 import ai.chat2db.server.web.api.controller.ai.fastchat.model.FastChatMessage;
+import ai.chat2db.server.web.api.controller.ai.response.ChatChoice;
 import ai.chat2db.server.web.api.controller.ai.response.ChatCompletionResponse;
-import ai.chat2db.server.web.api.controller.ai.response.ChatDelta;
 import ai.chat2db.server.web.api.controller.ai.zhipu.model.ZhipuChatCompletions;
 import ai.chat2db.server.web.api.util.ApplicationContextUtil;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -37,6 +37,13 @@ public class Chat2dbAIEventSourceListener extends EventSourceListener {
 
     private SseEmitter sseEmitter;
 
+    /**
+     * Buffer to accumulate streamed content for post-processing.
+     * DeepSeek models may output reasoning text and markdown code blocks in the content field.
+     */
+    private final StringBuilder contentBuffer = new StringBuilder();
+    private String completionId;
+
     public Chat2dbAIEventSourceListener(SseEmitter sseEmitter) {
         this.sseEmitter = sseEmitter;
     }
@@ -58,6 +65,17 @@ public class Chat2dbAIEventSourceListener extends EventSourceListener {
         log.info("Chat2db AI returns data: {}", data);
         if (data.equals("[DONE]")) {
             log.info("Chat2db AI return data is over");
+            // Process buffered content: clean up reasoning text and markdown code blocks
+            String fullContent = contentBuffer.toString();
+            String cleaned = cleanSqlOutput(fullContent);
+            if (!cleaned.isEmpty()) {
+                Message message = new Message();
+                message.setContent(cleaned);
+                sseEmitter.send(SseEmitter.event()
+                    .id(completionId != null ? completionId : "[DONE]")
+                    .data(message)
+                    .reconnectTime(3000));
+            }
             sseEmitter.send(SseEmitter.event()
                 .id("[DONE]")
                 .data("[DONE]")
@@ -68,25 +86,62 @@ public class Chat2dbAIEventSourceListener extends EventSourceListener {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         ChatCompletionResponse completionResponse = mapper.readValue(data, ChatCompletionResponse.class);
-        ChatDelta delta = completionResponse.getChoices().get(0).getDelta();
-        String text;
-        if (delta != null) {
-            // Only use content field; reasoning_content is DeepSeek's internal thinking process
-            // and should not be shown to the user
-            text = delta.getContent();
-        } else {
-            text = completionResponse.getChoices().get(0).getText();
+        ChatChoice choice = completionResponse.getChoices().get(0);
+        String text = choice.getDelta() == null
+            ? choice.getText()
+            : choice.getDelta().getContent();
+        if (completionResponse.getId() != null) {
+            completionId = completionResponse.getId();
         }
-        String completionId = completionResponse.getId();
+        // Buffer content for post-processing instead of sending immediately
+        if (text != null) {
+            contentBuffer.append(text);
+        }
+    }
 
-        Message message = new Message();
-        if (text != null && !text.isEmpty()) {
-            message.setContent(text);
-            sseEmitter.send(SseEmitter.event()
-                .id(completionId)
-                .data(message)
-                .reconnectTime(3000));
+    /**
+     * Clean up model output to extract only the SQL statement.
+     */
+    private String cleanSqlOutput(String content) {
+        if (content == null || content.isEmpty()) {
+            return "";
         }
+
+        String extracted = content;
+        if (content.contains("```")) {
+            int lastOpenIdx = content.lastIndexOf("```");
+            String beforeLast = content.substring(0, lastOpenIdx);
+            int matchingOpenIdx = beforeLast.lastIndexOf("```");
+            if (matchingOpenIdx >= 0) {
+                extracted = content.substring(matchingOpenIdx, lastOpenIdx);
+                extracted = extracted.replaceFirst("```\\w*\\s*", "");
+            }
+        }
+
+        extracted = extracted.replaceAll("```\\w*", "").replaceAll("```", "");
+
+        String[] lines = extracted.split("\n");
+        StringBuilder sqlBuilder = new StringBuilder();
+        boolean foundSql = false;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!foundSql) {
+                if (trimmed.matches("(?i)^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|WITH|EXPLAIN|SHOW|DESCRIBE|USE|--.*)\\b.*")) {
+                    foundSql = true;
+                    sqlBuilder.append(line).append("\n");
+                }
+            } else {
+                if (trimmed.isEmpty() || trimmed.matches("(?i)^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|WITH|EXPLAIN|SHOW|DESCRIBE|USE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AND|OR|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|SET|VALUES|INTO|--.*)\\b.*")
+                    || trimmed.endsWith(";") || trimmed.startsWith("(") || trimmed.startsWith(")")) {
+                    sqlBuilder.append(line).append("\n");
+                } else {
+                    break;
+                }
+            }
+        }
+
+        String result = foundSql ? sqlBuilder.toString().trim() : extracted.trim();
+        return result;
     }
 
     @Override

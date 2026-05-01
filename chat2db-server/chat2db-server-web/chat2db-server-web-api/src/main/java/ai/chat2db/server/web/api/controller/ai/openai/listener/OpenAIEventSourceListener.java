@@ -2,8 +2,8 @@ package ai.chat2db.server.web.api.controller.ai.openai.listener;
 
 import java.util.Objects;
 
+import ai.chat2db.server.web.api.controller.ai.response.ChatChoice;
 import ai.chat2db.server.web.api.controller.ai.response.ChatCompletionResponse;
-import ai.chat2db.server.web.api.controller.ai.response.ChatDelta;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +27,15 @@ public class OpenAIEventSourceListener extends EventSourceListener {
 
     private SseEmitter sseEmitter;
 
+    /**
+     * Buffer to accumulate streamed content for post-processing.
+     * DeepSeek models may output reasoning text and markdown code blocks in the content field,
+     * and markdown markers like ```sql can be split across chunks.
+     * We buffer all content and send the cleaned result at the end.
+     */
+    private final StringBuilder contentBuffer = new StringBuilder();
+    private String completionId;
+
     public OpenAIEventSourceListener(SseEmitter sseEmitter) {
         this.sseEmitter = sseEmitter;
     }
@@ -36,7 +45,7 @@ public class OpenAIEventSourceListener extends EventSourceListener {
      */
     @Override
     public void onOpen(EventSource eventSource, Response response) {
-        log.info("OpenAI建立sse连接...");
+        log.info("[V3-BUFFER-CLEAN] OpenAI建立sse连接... (new version with buffer+clean active)");
     }
 
     /**
@@ -45,9 +54,22 @@ public class OpenAIEventSourceListener extends EventSourceListener {
     @SneakyThrows
     @Override
     public void onEvent(EventSource eventSource, String id, String type, String data) {
-        log.info("OpenAI returns data: {}", data);
+        log.info("[V3-BUFFER-CLEAN] OpenAI returns data: {}", data);
         if (data.equals("[DONE]")) {
-            log.info("OpenAI returns data ended");
+            log.info("[V3-BUFFER-CLEAN] OpenAI returns data ended");
+            // Process buffered content: clean up reasoning text and markdown code blocks
+            String fullContent = contentBuffer.toString();
+            log.info("[V3-BUFFER-CLEAN] full buffered content (len={}): {}", fullContent.length(), fullContent);
+            String cleaned = cleanSqlOutput(fullContent);
+            log.info("[V3-BUFFER-CLEAN] cleaned output (len={}): {}", cleaned.length(), cleaned);
+            // Prepend a blank line so multiple outputs are visually separated in the editor
+            String finalOutput = "\n" + cleaned;
+            Message message = new Message();
+            message.setContent(finalOutput);
+            sseEmitter.send(SseEmitter.event()
+                .id(completionId != null ? completionId : "[DONE]")
+                .data(message)
+                .reconnectTime(3000));
             sseEmitter.send(SseEmitter.event()
                 .id("[DONE]")
                 .data("[DONE]")
@@ -59,23 +81,78 @@ public class OpenAIEventSourceListener extends EventSourceListener {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // Read JSON
         ChatCompletionResponse completionResponse = mapper.readValue(data, ChatCompletionResponse.class);
-        ChatDelta delta = completionResponse.getChoices().get(0).getDelta();
-        String text;
-        if (delta != null) {
-            // Only use content field; reasoning_content is DeepSeek's internal thinking process
-            // and should not be shown to the user
-            text = delta.getContent();
-        } else {
-            text = completionResponse.getChoices().get(0).getText();
+        ChatChoice choice = completionResponse.getChoices().get(0);
+        String text = choice.getDelta() == null
+            ? choice.getText()
+            : choice.getDelta().getContent();
+        if (completionResponse.getId() != null) {
+            completionId = completionResponse.getId();
         }
-        if (text != null && !text.isEmpty()) {
-            Message message = new Message();
-            message.setContent(text);
-            sseEmitter.send(SseEmitter.event()
-                .id(completionResponse.getId())
-                .data(message)
-                .reconnectTime(3000));
+        // Buffer content for post-processing instead of sending immediately
+        if (text != null) {
+            contentBuffer.append(text);
+            log.info("[V3-BUFFER-CLEAN] buffered chunk (total len now={}): '{}'", contentBuffer.length(), text);
         }
+    }
+
+    /**
+     * Clean up model output to extract only the SQL statement.
+     * Handles:
+     * 1. Markdown code blocks (```sql ... ```)
+     * 2. Reasoning/thinking text before the actual SQL
+     * 3. Extra explanations after the SQL
+     */
+    private String cleanSqlOutput(String content) {
+        if (content == null || content.isEmpty()) {
+            return "";
+        }
+
+        // Strategy 1: If content contains markdown code blocks, extract content from the LAST code block
+        // (the last one is most likely the correct SQL)
+        String extracted = content;
+        if (content.contains("```")) {
+            // Find the last ```...``` block
+            int lastOpenIdx = content.lastIndexOf("```");
+            // Search backwards for the matching opening ```
+            String beforeLast = content.substring(0, lastOpenIdx);
+            int matchingOpenIdx = beforeLast.lastIndexOf("```");
+            if (matchingOpenIdx >= 0) {
+                extracted = content.substring(matchingOpenIdx, lastOpenIdx);
+                // Remove the opening ``` and optional language tag (e.g. ```sql)
+                extracted = extracted.replaceFirst("```\\w*\\s*", "");
+            }
+        }
+
+        // Strategy 2: Remove any remaining ``` markers
+        extracted = extracted.replaceAll("```\\w*", "").replaceAll("```", "");
+
+        // Strategy 3: Try to find actual SQL statements and discard reasoning text before them
+        // Look for common SQL keywords at the start of a line
+        String[] lines = extracted.split("\n");
+        StringBuilder sqlBuilder = new StringBuilder();
+        boolean foundSql = false;
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!foundSql) {
+                // Check if this line looks like SQL (starts with SQL keyword or SQL comment)
+                if (trimmed.matches("(?i)^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|WITH|EXPLAIN|SHOW|DESCRIBE|USE|--.*)\\b.*")) {
+                    foundSql = true;
+                    sqlBuilder.append(line).append("\n");
+                }
+            } else {
+                // Once we've found SQL, keep appending until we hit a non-SQL line or end
+                if (trimmed.isEmpty() || trimmed.matches("(?i)^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|WITH|EXPLAIN|SHOW|DESCRIBE|USE|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AND|OR|GROUP|ORDER|HAVING|LIMIT|OFFSET|UNION|SET|VALUES|INTO|--.*)\\b.*")
+                    || trimmed.endsWith(";") || trimmed.startsWith("(") || trimmed.startsWith(")")) {
+                    sqlBuilder.append(line).append("\n");
+                } else {
+                    // Stop at non-SQL text (explanations after SQL)
+                    break;
+                }
+            }
+        }
+
+        String result = foundSql ? sqlBuilder.toString().trim() : extracted.trim();
+        return result;
     }
 
     @Override

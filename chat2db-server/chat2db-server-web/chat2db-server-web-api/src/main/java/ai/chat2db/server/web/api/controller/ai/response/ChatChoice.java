@@ -23,12 +23,12 @@ public class ChatChoice implements Serializable {
      * If the request parameter stream is true, the return value is delta.
      */
     @JsonProperty("delta")
-    private ChatDelta delta;
+    private ChatMessage delta;
     /**
      * If the request parameter stream is false, the return value is message.
      */
     @JsonProperty("message")
-    private ChatDelta message;
+    private ChatMessage message;
     /**
      * If the request parameter stream is false, the return value is message.
      */
