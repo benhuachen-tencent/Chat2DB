@@ -1,0 +1,35 @@
+# 构建上下文瘦身：不需要的文件不要发送给 Docker daemon，加快构建
+# 注意：保留 chat2db-client 和 chat2db-server 源码
+
+# 忽略 VCS
+.git
+.gitignore
+.github
+
+# 忽略 IDE/编辑器
+.idea
+.vscode
+*.iml
+.DS_Store
+
+# 忽略依赖和构建产物（会在镜像内重新生成）
+**/node_modules
+**/target
+**/dist
+**/build
+**/.umi
+**/.umi-production
+**/out
+**/*.log
+
+# 忽略本地缓存
+**/.mvn/wrapper/maven-wrapper.jar
+**/.cache
+
+# 忽略文档/变更日志（不影响运行）
+CHANGELOG*.md
+*LICENSE*
+README*.md
+
+# 忽略原有 docker 子目录里的测试内容
+docker/test

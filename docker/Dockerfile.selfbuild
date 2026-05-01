@@ -1,0 +1,64 @@
+# =============================================================================
+# Chat2DB 自构建镜像（多阶段构建）
+#   stage 1: 编译前端（Node 18 + yarn），产物：chat2db-client/dist
+#   stage 2: 编译后端（Maven 3.9 + JDK 17），产物：chat2db-server-web-start.jar
+#            构建前先把前端产物复制到 web-start 的 static/front 目录（对齐 publicPath）
+#   stage 3: 运行镜像（JDK 17，极简）
+#
+# 构建：  docker build -f docker/Dockerfile.selfbuild -t chat2db-self:latest .
+# 运行：  docker run -d --name chat2db-self \
+#            -p 10824:10824 \
+#            -v ~/.chat2db-docker:/root/.chat2db \
+#            chat2db-self:latest
+# =============================================================================
+
+# ---------- Stage 1: Frontend build ----------
+FROM node:18-bullseye AS frontend-build
+WORKDIR /build/chat2db-client
+
+# 为了最大化利用缓存：先复制依赖描述文件并安装依赖
+COPY chat2db-client/package.json chat2db-client/yarn.lock ./
+# 网络慢的话可启用国内镜像：
+# RUN yarn config set registry https://registry.npmmirror.com
+RUN yarn install --frozen-lockfile --network-timeout 600000
+
+# 再复制全部前端源码
+COPY chat2db-client/ ./
+# 产物：/build/chat2db-client/dist
+RUN yarn run build:web:prod
+
+# ---------- Stage 2: Backend build ----------
+FROM maven:3.9-eclipse-temurin-17 AS backend-build
+WORKDIR /build
+
+# 复制后端全部源码（整颗多模块树）
+COPY chat2db-server/ /build/chat2db-server/
+
+# 将前端产物放到 web-start 的 static/front 目录
+# （publicPath = ./static/front/，Spring MVC 映射 /static/** -> classpath:/static/）
+COPY --from=frontend-build /build/chat2db-client/dist/ \
+    /build/chat2db-server/chat2db-server-web-start/src/main/resources/static/front/
+
+# 编译打包（跳过测试）
+WORKDIR /build/chat2db-server
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn clean package -DskipTests -pl chat2db-server-web-start -am -q
+
+# ---------- Stage 3: Runtime ----------
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+# 只拷贝最终 jar，镜像体积最小化
+COPY --from=backend-build \
+    /build/chat2db-server/chat2db-server-web-start/target/chat2db-server-web-start.jar \
+    /app/chat2db-server-web-start.jar
+
+# 运行时需要写入用户数据的目录（可通过 -v 挂载持久化）
+RUN mkdir -p /root/.chat2db
+VOLUME ["/root/.chat2db"]
+
+EXPOSE 10824
+
+# 默认使用 release profile（端口 10824）
+ENV JAVA_OPTS="-Xms256m -Xmx1024m"
+ENTRYPOINT ["sh","-c","java $JAVA_OPTS -Dspring.profiles.active=release -jar /app/chat2db-server-web-start.jar"]
