@@ -3,6 +3,7 @@ package ai.chat2db.server.web.api.controller.ai.openai.listener;
 import java.util.Objects;
 
 import ai.chat2db.server.web.api.controller.ai.response.ChatCompletionResponse;
+import ai.chat2db.server.web.api.controller.ai.response.ChatDelta;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,11 +59,17 @@ public class OpenAIEventSourceListener extends EventSourceListener {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // Read JSON
         ChatCompletionResponse completionResponse = mapper.readValue(data, ChatCompletionResponse.class);
-        String text = completionResponse.getChoices().get(0).getDelta() == null
-            ? completionResponse.getChoices().get(0).getText()
-            : completionResponse.getChoices().get(0).getDelta().getContent();
-        Message message = new Message();
-        if (text != null) {
+        ChatDelta delta = completionResponse.getChoices().get(0).getDelta();
+        String text;
+        if (delta != null) {
+            // Only use content field; reasoning_content is DeepSeek's internal thinking process
+            // and should not be shown to the user
+            text = delta.getContent();
+        } else {
+            text = completionResponse.getChoices().get(0).getText();
+        }
+        if (text != null && !text.isEmpty()) {
+            Message message = new Message();
             message.setContent(text);
             sseEmitter.send(SseEmitter.event()
                 .id(completionResponse.getId())

@@ -58,6 +58,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.alibaba.fastjson2.JSON;
 import com.google.common.collect.Lists;
+import com.unfbx.chatgpt.entity.chat.ChatCompletion;
 import com.unfbx.chatgpt.entity.chat.Message;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -299,7 +300,13 @@ public class ChatController {
         buildSseEmitter(sseEmitter, uid);
 
         OpenAIEventSourceListener openAIEventSourceListener = new OpenAIEventSourceListener(sseEmitter);
-        OpenAIClient.getInstance().streamChatCompletion(messages, openAIEventSourceListener);
+        // Use configured model name instead of default gpt-3.5-turbo
+        String model = OpenAIClient.getModel();
+        ChatCompletion chatCompletion = ChatCompletion.builder()
+                .messages(messages)
+                .model(model)
+                .build();
+        OpenAIClient.getInstance().streamChatCompletion(chatCompletion, openAIEventSourceListener);
         LocalCache.CACHE.put(uid, JSONUtil.toJsonStr(messages), LocalCache.TIMEOUT);
         return sseEmitter;
     }

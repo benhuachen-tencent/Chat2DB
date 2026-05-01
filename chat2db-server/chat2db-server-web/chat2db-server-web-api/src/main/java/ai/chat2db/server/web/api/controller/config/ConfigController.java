@@ -143,6 +143,9 @@ public class ConfigController {
         SystemConfigParam httpProxyPortParam = SystemConfigParam.builder().code(OpenAIClient.PROXY_PORT).content(
             request.getHttpProxyPort()).build();
         configService.createOrUpdate(httpProxyPortParam);
+        SystemConfigParam modelParam = SystemConfigParam.builder().code(OpenAIClient.OPENAI_MODEL).content(
+            request.getModel()).build();
+        configService.createOrUpdate(modelParam);
         OpenAIClient.refresh();
     }
 
@@ -308,12 +311,14 @@ public class ConfigController {
                 DataResult<Config> apiHost = configService.find(OpenAIClient.OPENAI_HOST);
                 DataResult<Config> httpProxyHost = configService.find(OpenAIClient.PROXY_HOST);
                 DataResult<Config> httpProxyPort = configService.find(OpenAIClient.PROXY_PORT);
+                DataResult<Config> openaiModel = configService.find(OpenAIClient.OPENAI_MODEL);
                 config.setApiKey(Objects.nonNull(apiKey.getData()) ? apiKey.getData().getContent() : "");
                 config.setApiHost(Objects.nonNull(apiHost.getData()) ? apiHost.getData().getContent() : "");
                 config.setHttpProxyHost(
                     Objects.nonNull(httpProxyHost.getData()) ? httpProxyHost.getData().getContent() : "");
                 config.setHttpProxyPort(
                     Objects.nonNull(httpProxyPort.getData()) ? httpProxyPort.getData().getContent() : "");
+                config.setModel(Objects.nonNull(openaiModel.getData()) ? openaiModel.getData().getContent() : "");
                 break;
             case CHAT2DBAI:
                 DataResult<Config> chat2dbApiKey = configService.find(Chat2dbAIClient.CHAT2DB_OPENAI_KEY);

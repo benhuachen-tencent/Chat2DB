@@ -6,7 +6,6 @@ import java.io.Serializable;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.unfbx.chatgpt.entity.chat.Message;
 import lombok.Data;
 
 /**
@@ -24,12 +23,12 @@ public class ChatChoice implements Serializable {
      * If the request parameter stream is true, the return value is delta.
      */
     @JsonProperty("delta")
-    private Message delta;
+    private ChatDelta delta;
     /**
      * If the request parameter stream is false, the return value is message.
      */
     @JsonProperty("message")
-    private Message message;
+    private ChatDelta message;
     /**
      * If the request parameter stream is false, the return value is message.
      */

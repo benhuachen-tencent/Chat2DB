@@ -31,6 +31,11 @@ public class OpenAIClient {
     public static final String OPENAI_HOST = "chatgpt.apiHost";
 
     /**
+     * OPENAI model
+     */
+    public static final String OPENAI_MODEL = "chatgpt.model";
+
+    /**
      * Proxy IP
      */
     public static final String PROXY_HOST = "chatgpt.proxy.host";
@@ -42,6 +47,7 @@ public class OpenAIClient {
 
     private static OpenAiStreamClient OPEN_AI_STREAM_CLIENT;
     private static String apiKey;
+    private static String model;
 
     public static OpenAiStreamClient getInstance() {
         if (OPEN_AI_STREAM_CLIENT != null) {
@@ -73,11 +79,22 @@ public class OpenAIClient {
         if (apiHostConfig != null) {
             apiHost = apiHostConfig.getContent();
         }
+        // Ensure apiHost ends with '/' to avoid URL concatenation issues
+        if (StringUtils.isNotBlank(apiHost) && !apiHost.endsWith("/")) {
+            apiHost = apiHost + "/";
+        }
         Config config = configService.find(OPENAI_KEY).getData();
         if (config != null) {
             apikey = config.getContent();
         } else {
             apikey = ApplicationContextUtil.getProperty(OPENAI_KEY);
+        }
+        // Read model configuration
+        Config modelConfig = configService.find(OPENAI_MODEL).getData();
+        if (modelConfig != null && StringUtils.isNotBlank(modelConfig.getContent())) {
+            model = modelConfig.getContent();
+        } else {
+            model = "deepseek-v4-flash";
         }
         String host = System.getProperty("http.proxyHost");
         Config hostConfig = configService.find(PROXY_HOST).getData();
@@ -90,7 +107,7 @@ public class OpenAIClient {
         if (portConfig != null && StringUtils.isNotBlank(portConfig.getContent())) {
             port = Integer.valueOf(portConfig.getContent());
         }
-        log.info("refresh openai apikey:{}", maskApiKey(apikey));
+        log.info("refresh openai apikey:{}, model:{}", maskApiKey(apikey), model);
         if (Objects.nonNull(host) && Objects.nonNull(port)) {
             Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(host, port));
             OkHttpClient okHttpClient = new OkHttpClient.Builder().proxy(proxy).build();
@@ -101,6 +118,24 @@ public class OpenAIClient {
                 Lists.newArrayList(apikey)).build();
         }
         apiKey = apikey;
+    }
+
+    public static String getModel() {
+        if (model == null) {
+            // Try to read model from config, or use default
+            try {
+                ConfigService configService = ApplicationContextUtil.getBean(ConfigService.class);
+                Config modelConfig = configService.find(OPENAI_MODEL).getData();
+                if (modelConfig != null && StringUtils.isNotBlank(modelConfig.getContent())) {
+                    model = modelConfig.getContent();
+                } else {
+                    model = "deepseek-v4-flash";
+                }
+            } catch (Exception e) {
+                model = "deepseek-v4-flash";
+            }
+        }
+        return model;
     }
 
     private static String maskApiKey(String input) {
