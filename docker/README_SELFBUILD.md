@@ -18,6 +18,28 @@
 
 ## 三、一键部署
 
+### 方式 1：用脚本（推荐，不用记命令）
+
+```bash
+# 1. Clone 仓库（替换成你的 fork 地址）
+git clone https://github.com/benhuachen-tencent/Chat2DB.git
+cd Chat2DB
+
+# 2. 一键构建 + 启动
+./docker/build-self.sh run
+
+# 脚本支持的环境变量（可选）：
+#   HOST_DATA_DIR=/data/chat2db    指定宿主机数据目录（默认 ~/.chat2db-docker）
+#   HOST_PORT=18824                指定宿主机端口（默认 10824）
+# 示例：HOST_DATA_DIR=/data/chat2db HOST_PORT=18824 ./docker/build-self.sh run
+```
+
+脚本会**自动切到项目根目录**再执行构建，无论你从哪儿调用都不会踩到"构建上下文路径"的坑。
+
+### 方式 2：手动命令
+
+> ⚠️ 必须在**项目根目录** `Chat2DB/` 下执行，因为 Dockerfile 内的 `COPY chat2db-client/…` 路径是相对于构建上下文（最后那个 `.`）的。
+
 ```bash
 # 1. Clone 仓库（替换成你的 fork 地址）
 git clone https://github.com/benhuachen-tencent/Chat2DB.git
